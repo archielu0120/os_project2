@@ -29,6 +29,7 @@
 #define master_IOCTL_MMAP 0x12345678
 #define master_IOCTL_EXIT 0x12345679
 #define BUF_SIZE 512
+#define MAP_SIZE 409600
 
 typedef struct socket * ksocket_t;
 
@@ -137,11 +138,13 @@ static void __exit master_exit(void)
 
 int master_close(struct inode *inode, struct file *filp)
 {
+	kfree(filp->private_data);
 	return 0;
 }
 
 int master_open(struct inode *inode, struct file *filp)
 {
+	filp->private_data = kmalloc(MAP_SIZE, GFP_KERNEL);
 	return 0;
 }
 
