@@ -95,7 +95,7 @@ int main(int argc, char *argv[]){
                         printf("to_device\n");
                         printf("%s\n",to_device);
                         memcpy(to_device, from_file, len);
-                                                offset += len;
+                        offset += len;
                         file_sz[i] -= len;
                         if(file_sz[i] != 0) device_offset += PAGE_SIZE * 100;
                         else {
@@ -134,7 +134,7 @@ int get_size(){
         total_file_size += st_buf.st_size;
         file_sz[i] = st_buf.st_size;
     }
-    
+
     if(method == 'f') write(device_fd, size_buf, offset);
     else{
         printf("%s\n",size_buf);
