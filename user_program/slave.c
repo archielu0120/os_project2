@@ -28,7 +28,7 @@ char *from_device, *to_file;
 const char special_char = 'E';
 int total_file_size = 0, file_index = 0;
 int PAGE_SIZE = 4096;
-
+char *dst;
 void open_device();
 void establish_connect();
 void close_connect();
@@ -97,56 +97,59 @@ int main(int argc, char *argv[]){
             }
             break;
         case 'm' :
+
             for(int i = 0; i<N; i++){
                 printf("%d\n",file_sz[i]);
              }
-            for(int i = 0 ; i < N ; i++){
-
+             lseek(device_fd , device_offset , SEEK_SET);
+             int det;
+             for(int i = 0 ; i < N ; i++){
                 int offset = 0;
                 int num_of_page = file_sz[i] / PAGE_SIZE;
                 if(file_sz[i] % PAGE_SIZE != 0) num_of_page ++;
-                printf("file %d, num_of_page %d\n",i,num_of_page);
-
-                int rec;
+                device_offset += num_of_page * PAGE_SIZE;
                 if(num_of_page <= 100){
-                    for(int j = 0; j<num_of_page; j++){
-                        rec = ioctl(device_fd, 0x12345678);
-                        printf("rec: %d\n",rec);
-                    }
-                    printf("kernel ok\n");
-                    printf("device offset %d\n",device_offset);
-                    if(from_device = mmap(NULL, file_sz[i] , PROT_READ , MAP_SHARED , device_fd , device_offset) == (void *) - 1){
+                    if(det = posix_fallocate(file_fd[i], offset, file_sz[i]) != 0){
                         printf("%s\n",strerror(errno));
                     }
-                    printf("device mmap\n");
-                    printf("offset %d\n",offset);
-                    if(to_file = mmap(NULL, file_sz[i] , PROT_WRITE , MAP_SHARED ,  file_fd[i], offset) == (void *) - 1){
+                    if(dst = mmap(NULL, file_sz[i], PROT_WRITE, MAP_SHARED, file_fd[i], 0) == (void *) -1){
                         printf("%s\n",strerror(errno));
                     }
-                    printf("file mmap\n");
-                    memcpy(to_file, from_device, file_sz[i]);
+                    while(file_sz[i] > 0){
+                        read(device_fd, buf, BUFFER_SIZE);
+                        int mmap_len = (file_sz[i] < BUFFER_SIZE) ? file_sz[i] : BUFFER_SIZE;
+                        printf("mmap_len %d\n",mmap_len);
+                        printf("buf\n%s\n",buf);
+                        memcpy(&dst[offset], buf, mmap_len);
+                        file_sz[i] -= mmap_len;
+                        offset += mmap_len;
+                    }
 
-                    device_offset += num_of_page * PAGE_SIZE;
-
+                    lseek(device_fd ,  device_offset , SEEK_SET);
                 }
                 else{
-                    
+                    int map_cnt = 0;
                     while(file_sz[i] > 0){
-                        int len = (file_sz[i] >= 409600) ? 409600 : file_sz[i];
-                        from_device = mmap(NULL, len , PROT_READ , MAP_SHARED , device_fd , device_offset);
-                        to_file = mmap(NULL, len , PROT_WRITE , MAP_SHARED , file_fd[i] , offset);
-                        memcpy(to_file, from_device, len);
-                        offset += len;
-                        file_sz[i] -= len;
-                        if(file_sz[i] != 0) device_offset += PAGE_SIZE * 100;
-                        else {
-                            device_offset += (len / PAGE_SIZE) * PAGE_SIZE;
-                            if(len % PAGE_SIZE != 0) device_offset += PAGE_SIZE;
+                        int map_file_len = (file_sz[i] < 409600) ? file_sz[i] : 409600;
+                        if(dst = mmap(NULL,  map_file_len, PROT_READ, map_file_len, file_fd[i], map_cnt * 409600) == (void *) -1){
+                            printf("%s\n",strerror(errno));
                         }
+                        int have_read = 0;
+                        while(have_read < map_file_len){
+                            read(device_fd, buf, BUFFER_SIZE);
+                            int mmap_len = (file_sz[i] < BUFFER_SIZE) ? file_sz[i] : BUFFER_SIZE;
+                            memcpy(&dst[offset], buf, mmap_len);
+                            file_sz[i] -= mmap_len;
+                            offset += mmap_len;
+                            have_read += mmap_len;
+                        }
+                        map_cnt ++;
                     }
+                    lseek(device_fd ,  device_offset , SEEK_SET);
                 }
             }
             break;
+            
         default :
             perror("Method error\n");
             return -1;
