@@ -21,6 +21,7 @@ int device_fd, file_fd[128], file_sz[128];
 char filename[128][128];
 char method; // 'f' if file IO , 'm' if mmap
 char buf[BUFFER_SIZE];
+char write_buf[410000];
 size_t file_size, ret, device_offset = 0;
 struct timeval start_time, end_time;
 char *from_file, *to_device;
@@ -28,6 +29,7 @@ const char special_char = 'E';
 int total_file_size = 0;
 int size_len = 0;
 int PAGE_SIZE = 4096;
+int write_size = 0, file_index = 0;
 
 int get_size();
 void open_device();
@@ -67,44 +69,40 @@ int main(int argc, char *argv[]){
             }
             break;
         case 'm' :
-            device_offset += PAGE_SIZE;
-            for(int i = 0 ; i < N ; i ++){
-                int offset = 0;
+            for(int i = 0 ; i < N ; i++){
                 int num_of_page = file_sz[i] / PAGE_SIZE ;
                 if(file_sz[i] % PAGE_SIZE != 0) num_of_page ++;
-                
                 if(num_of_page <= 100){
-                    from_file = mmap(NULL, file_sz[i] , PROT_READ , MAP_SHARED , file_fd[i] , offset);
-                    to_device = mmap(NULL, file_sz[i] , PROT_WRITE , MAP_SHARED , device_fd , device_offset);
-
-                    memcpy(to_device, from_file, file_sz[i]);
-                    ioctl(device_fd, 0x12345678, num_of_page * PAGE_SIZE);  
-                  
-                    printf("%d\n",i);
-                    printf("%.*s'\n", file_sz[i], to_device);
-                    
-                    device_offset += num_of_page * PAGE_SIZE;
+                    from_file = mmap(NULL, file_sz[i] , PROT_READ , MAP_SHARED , file_fd[i] , 0);
+                    memcpy(write_buf, from_file, file_sz[i]);
+                    int wr_offset = 0;
+                    while(file_sz[i] > 0){
+                        int wr_len = (file_sz[i] < BUFFER_SIZE) ? file_sz[i] : BUFFER_SIZE;
+                        write(device_fd, &write_buf[wr_offset], wr_len);
+                        file_sz[i] -= wr_len;
+                        wr_offset += wr_len;
+                    }
                 }
                 else{
+                    int offset = 0;
                     while(file_sz[i] > 0){
-                        int len = (file_sz[i] >= 409600) ? 409600 : file_sz[i];
-                        from_file = mmap(NULL, len , PROT_READ , MAP_SHARED , file_fd[i] , offset);
-                        printf("from_file:\n");
-                        printf("%s\n",from_file);
-                        to_device = mmap(NULL, len , PROT_WRITE , MAP_SHARED , device_fd , device_offset);
-                        printf("to_device\n");
-                        printf("%s\n",to_device);
-                        memcpy(to_device, from_file, len);
-                        offset += len;
-                        file_sz[i] -= len;
-                        if(file_sz[i] != 0) device_offset += PAGE_SIZE * 100;
-                        else {
-                            device_offset += (len / PAGE_SIZE) * PAGE_SIZE;
-                            if(len % PAGE_SIZE != 0) device_offset += PAGE_SIZE;
+                        int rd_len = (file_sz[i] < 409600)? file_sz[i] : 409600;
+                        from_file = mmap(NULL, rd_len , PROT_READ , MAP_SHARED , file_fd[i] , offset);
+                        memcpy(write_buf, from_file, rd_len);
+                        offset += rd_len;
+                        int wr_offset = 0;
+                        while(wr_offset < rd_len){
+                            int wr_len = (file_sz[i] < BUFFER_SIZE) ? file_sz[i] : BUFFER_SIZE;
+                            printf("%d\n", wr_len);
+                            write(device_fd, &write_buf[wr_offset], wr_len);
+                            file_sz[i] -= wr_len;
+                            wr_offset += wr_len;
                         }
+                        
                     }
                 }
             }
+            
             break;
         default :
             perror("Method error\n");
@@ -125,25 +123,19 @@ int main(int argc, char *argv[]){
 
 int get_size(){
     int total = 0;
-    char size_buf[4100], offset = 0;
+    char size_buf[20];
     for(int i = 0 ; i < N ; i++){
         struct stat st_buf;
         stat(filename[i], &st_buf);
-        sprintf(&size_buf[offset] , "%lld%c\0" , st_buf.st_size , special_char);
-        offset = strlen(size_buf);
+        sprintf(size_buf , "%lld%c\0" , st_buf.st_size , special_char);
+        int len = strlen(size_buf);
+        write(device_fd, size_buf, len);
+        total += len;
         total_file_size += st_buf.st_size;
         file_sz[i] = st_buf.st_size;
     }
 
-    if(method == 'f') write(device_fd, size_buf, offset);
-    else{
-        printf("%s\n",size_buf);
-        for(int k = 0; k<8; k++){
-            write(device_fd, size_buf, BUFFER_SIZE);
-        }
-
-    }
-    return offset;
+    return total;
 }
 
 
