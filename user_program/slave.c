@@ -65,7 +65,7 @@ int main(int argc, char *argv[]){
                 int len;
                 if(init == 1) {
                     init = 0;
-                    len = strlen(buf);
+                    len = first_read_size;
                 }
                 else{
                     begin_index = 0;
@@ -242,4 +242,3 @@ int get_size_from_read(){
     if(index < ret) return index;
     else return -1;
 }
-
