@@ -22,6 +22,7 @@ char method;
 char master_method;
 char master_ip[16];
 char buf[BUFFER_SIZE];
+char write_buf[410000];
 size_t file_size, ret, device_offset = 0;
 struct timeval start_time, end_time;
 char *from_device, *to_file;
@@ -34,7 +35,7 @@ void establish_connect();
 void close_connect();
 void clean_all();
 int get_size_from_read();
-void get_size_for_mmap();
+int first_read_size = 0;
 
 int main(int argc, char *argv[]){
     PAGE_SIZE = getpagesize();
@@ -52,15 +53,10 @@ int main(int argc, char *argv[]){
     establish_connect();
     
     int begin_index = 0, init = 0;
-    if(method == 'f'){
-        begin_index = get_size_from_read();
-        if(begin_index != -1) init = 1;
-        printf("init = %d\n",init);
-    }
-    else{
-        get_size_for_mmap();
-        device_offset += PAGE_SIZE;
-    }
+    begin_index = get_size_from_read();
+    if(begin_index != -1)  init = 1;
+    printf("begin_index = %d\n",begin_index);
+    
     gettimeofday(&start_time,NULL);
     
     switch(method){
@@ -70,7 +66,6 @@ int main(int argc, char *argv[]){
                 if(init == 1) {
                     init = 0;
                     len = strlen(buf);
-
                 }
                 else{
                     begin_index = 0;
@@ -97,55 +92,73 @@ int main(int argc, char *argv[]){
             }
             break;
         case 'm' :
-
             for(int i = 0; i<N; i++){
                 printf("%d\n",file_sz[i]);
-             }
-             lseek(device_fd , device_offset , SEEK_SET);
-             int det;
-             for(int i = 0 ; i < N ; i++){
-                int offset = 0;
-                int num_of_page = file_sz[i] / PAGE_SIZE;
-                if(file_sz[i] % PAGE_SIZE != 0) num_of_page ++;
-                device_offset += num_of_page * PAGE_SIZE;
-                if(num_of_page <= 100){
-                    if(det = posix_fallocate(file_fd[i], offset, file_sz[i]) != 0){
-                        printf("%s\n",strerror(errno));
-                    }
-                    if(dst = mmap(NULL, file_sz[i], PROT_WRITE, MAP_SHARED, file_fd[i], 0) == (void *) -1){
-                        printf("%s\n",strerror(errno));
-                    }
-                    while(file_sz[i] > 0){
-                        read(device_fd, buf, BUFFER_SIZE);
-                        int mmap_len = (file_sz[i] < BUFFER_SIZE) ? file_sz[i] : BUFFER_SIZE;
-                        printf("mmap_len %d\n",mmap_len);
-                        printf("buf\n%s\n",buf);
-                        memcpy(&dst[offset], buf, mmap_len);
-                        file_sz[i] -= mmap_len;
-                        offset += mmap_len;
-                    }
-
-                    lseek(device_fd ,  device_offset , SEEK_SET);
+            }
+            int init_mmap = 1, mmap_type = 1, mmap_cnt = 0;
+            int write_buf_offset = 0;
+            while(file_index < N){
+                int len;
+                if(init == 1) {
+                    init = 0;
+                    len = first_read_size;
                 }
                 else{
-                    int map_cnt = 0;
-                    while(file_sz[i] > 0){
-                        int map_file_len = (file_sz[i] < 409600) ? file_sz[i] : 409600;
-                        if(dst = mmap(NULL,  map_file_len, PROT_READ, map_file_len, file_fd[i], map_cnt * 409600) == (void *) -1){
-                            printf("%s\n",strerror(errno));
+                    begin_index = 0;
+                    lseek(device_fd, device_offset, SEEK_SET);
+                    len = read(device_fd, buf, BUFFER_SIZE);
+                    device_offset += len;
+                    //printf("%s", buf);
+                    if(len == 0) continue;
+                }
+                printf("file_index = %d , len = %d\n",file_index , len);
+                while(begin_index < len){
+                    printf("begin_index = %d , file_index = %d\n", begin_index, file_index);
+                    if(init_mmap){
+                        if(file_sz[file_index] < 409600) {
+                            mmap_type = 1; // small
+                            posix_fallocate(file_fd[file_index], mmap_cnt * 409600, file_sz[file_index]);
+                            dst = mmap(NULL, file_sz[file_index], PROT_WRITE, MAP_SHARED, file_fd[file_index], mmap_cnt * 409600);
                         }
-                        int have_read = 0;
-                        while(have_read < map_file_len){
-                            read(device_fd, buf, BUFFER_SIZE);
-                            int mmap_len = (file_sz[i] < BUFFER_SIZE) ? file_sz[i] : BUFFER_SIZE;
-                            memcpy(&dst[offset], buf, mmap_len);
-                            file_sz[i] -= mmap_len;
-                            offset += mmap_len;
-                            have_read += mmap_len;
+                        else {
+                            mmap_type = 2; // large
+                            posix_fallocate(file_fd[file_index], mmap_cnt * 409600 , 409600);
+                            dst = mmap(NULL, 409600, PROT_WRITE, MAP_SHARED, file_fd[file_index], mmap_cnt * 409600);
                         }
-                        map_cnt ++;
+                        init_mmap = 0;
                     }
-                    lseek(device_fd ,  device_offset , SEEK_SET);
+                    if(mmap_type == 1){
+                        int rd_len = (file_sz[file_index] < len - begin_index) ? file_sz[file_index] : len-begin_index;
+                        memcpy(&write_buf[write_buf_offset], &buf[begin_index], rd_len);
+                        write_buf_offset += rd_len;
+                        file_sz[file_index] -= rd_len;
+                        begin_index += rd_len;
+                        if(file_sz[file_index] == 0){
+                            memcpy(dst, write_buf, write_buf_offset);
+                            mmap_cnt = 0;
+                            write_buf_offset = 0;
+                            file_index ++;
+                            init_mmap = 1;
+                        }
+                    }
+                    if(mmap_type == 2){
+                        int rd_len = (409600-write_buf_offset < len-begin_index)? 409600-write_buf_offset : len-begin_index;
+                        memcpy(&write_buf[write_buf_offset], &buf[begin_index], rd_len);
+                        write_buf_offset += rd_len;
+                        file_sz[file_index] -= rd_len;
+                        begin_index += rd_len;
+                        if(write_buf_offset == 409600){
+                            memcpy(dst, write_buf, write_buf_offset);
+                            init_mmap = 1;
+                            mmap_cnt ++;
+                            if(file_sz[file_index] == 0) {
+                                file_index ++;
+                                write_buf_offset = 0;
+                                mmap_cnt = 0;
+                            }
+                        }
+                    }
+                    
                 }
             }
             break;
@@ -203,8 +216,10 @@ void clean_all(){
 int get_size_from_read(){
     int f_index = 0, END = 0;
     int index = 0, ret = 0;
+    int total = 0;
     while(!END){
         ret = read(device_fd, buf, BUFFER_SIZE);
+        
         printf("ret = %d\n",ret);
         if(ret == 0) continue;
         index = 0;
@@ -220,29 +235,11 @@ int get_size_from_read(){
             file_sz[f_index] = file_sz[f_index] * 10 + buf[index] - '0';
             index ++;
         }
+        total += index;
     }
     printf("index = %d\n",index);
+    first_read_size = ret;
     if(index < ret) return index;
     else return -1;
 }
 
-void get_size_for_mmap(){
-    char size_buf[4100];
-    read(device_fd, size_buf, BUFFER_SIZE);
-    printf("%s\n",size_buf);
-    int file_cnt = 0,  size = 0;
-    for(int i = 0 ; file_cnt < N ; i++){
-        if(size_buf[i] != special_char){
-            size = size * 10 + size_buf[i] - '0';
-        }
-        
-        else{
-            file_sz[file_cnt] = size;
-            size = 0;
-            file_cnt ++;
-        }
-    }
-    for(int i = 0; i<7; i++){
-        read(device_fd, size_buf, BUFFER_SIZE);
-    }
-}
