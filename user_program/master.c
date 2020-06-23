@@ -15,7 +15,7 @@
 #define master_IOCTL_CREATESOCK 0x12345677
 #define master_IOCTL_MMAP 0x12345678
 #define master_IOCTL_EXIT 0x12345679
-
+#define MAP_SIZE 409600
 int N;
 int device_fd, file_fd[128], file_sz[128];
 char filename[128][128];
@@ -30,7 +30,16 @@ int total_file_size = 0;
 int size_len = 0;
 int PAGE_SIZE = 4096;
 int write_size = 0, file_index = 0;
-
+int start_point;
+int file_idx = 0;
+int device_mmap_offset = 0;
+int file_mmap_offset = 0;
+int file_offset = 0;
+char *dst;
+char *src;
+char *sf;
+int det;
+int sf_fd;
 int get_size();
 void open_device();
 void open_connect();
@@ -52,9 +61,12 @@ int main(int argc, char *argv[]){
     
     open_device();
     open_connect();
-    
+    if(method == 'm'){
+        sf_fd=open("size_file" , O_CREAT|O_RDWR);
+    }
     
     size_len = get_size();
+    start_point = size_len;
     gettimeofday(&start_time,NULL);
     
     switch(method){
@@ -69,39 +81,54 @@ int main(int argc, char *argv[]){
             }
             break;
         case 'm' :
-            for(int i = 0 ; i < N ; i++){
-                int num_of_page = file_sz[i] / PAGE_SIZE ;
-                if(file_sz[i] % PAGE_SIZE != 0) num_of_page ++;
-                if(num_of_page <= 100){
-                    from_file = mmap(NULL, file_sz[i] , PROT_READ , MAP_SHARED , file_fd[i] , 0);
-                    memcpy(write_buf, from_file, file_sz[i]);
-                    int wr_offset = 0;
-                    while(file_sz[i] > 0){
-                        int wr_len = (file_sz[i] < BUFFER_SIZE) ? file_sz[i] : BUFFER_SIZE;
-                        write(device_fd, &write_buf[wr_offset], wr_len);
-                        file_sz[i] -= wr_len;
-                        wr_offset += wr_len;
+            sf = mmap(NULL,start_point,PROT_WRITE|PROT_READ, MAP_SHARED, sf_fd, 0);
+            dst = mmap(NULL,MAP_SIZE,PROT_WRITE|PROT_READ, MAP_SHARED, device_fd, device_offset);
+            memcpy(dst,sf,start_point);
+            //printf("dedvice_mmap_offset %d\n",device_mmap_offset);
+            device_mmap_offset = start_point;
+            while(file_idx < N){
+                file_offset = 0;
+                while(file_sz[file_idx] > 0){
+                    int ret;
+                    if(file_sz[file_idx] <= MAP_SIZE){
+                        src=mmap(NULL,file_sz[file_idx],PROT_WRITE|PROT_READ, MAP_SHARED, file_fd[file_idx], file_offset);
+                        ret = file_sz[file_idx];
+                        file_sz[file_idx] = 0;
+                        file_idx++;
                     }
-                }
-                else{
-                    int offset = 0;
-                    while(file_sz[i] > 0){
-                        int rd_len = (file_sz[i] < 409600)? file_sz[i] : 409600;
-                        from_file = mmap(NULL, rd_len , PROT_READ , MAP_SHARED , file_fd[i] , offset);
-                        memcpy(write_buf, from_file, rd_len);
-                        offset += rd_len;
-                        int wr_offset = 0;
-                        while(wr_offset < rd_len){
-                            int wr_len = (file_sz[i] < BUFFER_SIZE) ? file_sz[i] : BUFFER_SIZE;
-                            printf("%d\n", wr_len);
-                            write(device_fd, &write_buf[wr_offset], wr_len);
-                            file_sz[i] -= wr_len;
-                            wr_offset += wr_len;
+                    else{
+                        src=mmap(NULL,MAP_SIZE,PROT_WRITE|PROT_READ, MAP_SHARED, file_fd[file_idx], file_offset);
+                        file_sz[file_idx] -= MAP_SIZE;
+                        ret = MAP_SIZE;
+                        file_offset += MAP_SIZE;
+                    }
+                    //printf("%d\n",ret);
+                    if(device_mmap_offset + ret > MAP_SIZE){
+                        memcpy(&dst[device_mmap_offset],src,MAP_SIZE - device_mmap_offset);
+                        ioctl(device_fd,0x12345678,MAP_SIZE);
+                        //printf("%d\n",det);
+                        file_mmap_offset = MAP_SIZE - device_mmap_offset;
+                        device_offset += MAP_SIZE;
+                        munmap(dst,MAP_SIZE);
+                        dst = mmap(NULL,MAP_SIZE,PROT_WRITE|PROT_READ, MAP_SHARED, device_fd, device_offset);
+                        memcpy(dst,&src[file_mmap_offset],device_mmap_offset+ret-MAP_SIZE);
+                        device_mmap_offset = device_mmap_offset + ret- MAP_SIZE;
+                    }
+                    else{
+                        memcpy(&dst[device_mmap_offset],src,ret);
+                        //printf("------------------\n");
+                        //printf("%s\n",dst);
+                        device_mmap_offset += ret;
+                        if(file_idx == N){
+                            ioctl(device_fd,0x12345678,device_mmap_offset);
+                            //printf("det: %d\n",det);
                         }
-                        
+
                     }
+                    //printf("device_mmap_offset: %d\n",device_mmap_offset);
                 }
             }
+            
             
             break;
         default :
@@ -129,7 +156,12 @@ int get_size(){
         stat(filename[i], &st_buf);
         sprintf(size_buf , "%lld%c\0" , st_buf.st_size , special_char);
         int len = strlen(size_buf);
-        write(device_fd, size_buf, len);
+        if(method == 'f'){
+            write(device_fd, size_buf, len);
+        }
+        else{
+            write(sf_fd, size_buf, len);
+        }
         total += len;
         total_file_size += st_buf.st_size;
         file_sz[i] = st_buf.st_size;
