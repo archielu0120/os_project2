@@ -55,7 +55,7 @@ int main(int argc, char *argv[]){
     int begin_index = 0, init = 0;
     begin_index = get_size_from_read();
     if(begin_index != -1)  init = 1;
-    printf("begin_index = %d\n",begin_index);
+   // printf("begin_index = %d\n",begin_index);
     
     gettimeofday(&start_time,NULL);
     
@@ -72,7 +72,7 @@ int main(int argc, char *argv[]){
                     len = read(device_fd, buf, BUFFER_SIZE);
                     if(len == 0) continue;
                 }
-                printf("%d\n",len);
+                //printf("%d\n",len);
                 while(begin_index < len){
                     if(file_sz[file_index] >= len-begin_index){
                         write(file_fd[file_index], &buf[begin_index], len-begin_index);
@@ -92,9 +92,7 @@ int main(int argc, char *argv[]){
             }
             break;
         case 'm' :
-            for(int i = 0; i<N; i++){
-                printf("%d\n",file_sz[i]);
-            }
+	    printf("MMAP\n");            
             int init_mmap = 1, mmap_type = 1, mmap_cnt = 0;
             int write_buf_offset = 0;
             while(file_index < N){
@@ -111,9 +109,9 @@ int main(int argc, char *argv[]){
                     //printf("%s", buf);
                     if(len == 0) continue;
                 }
-                printf("file_index = %d , len = %d\n",file_index , len);
+               // printf("file_index = %d , len = %d\n",file_index , len);
                 while(begin_index < len){
-                    printf("begin_index = %d , file_index = %d, write_buf_offset = %d\n", begin_index, file_index, write_buf_offset);
+                   // printf("begin_index = %d , file_index = %d, write_buf_offset = %d\n", begin_index, file_index, write_buf_offset);
                     if(init_mmap){
                         if(file_sz[file_index] < 409600) {
                             mmap_type = 1; // small
@@ -219,7 +217,7 @@ int get_size_from_read(){
     while(!END){
         ret = read(device_fd, buf, BUFFER_SIZE);
         
-        printf("ret = %d\n",ret);
+       // printf("ret = %d\n",ret);
         if(ret == 0) continue;
         index = 0;
         while(index < ret && f_index < N){
@@ -236,7 +234,7 @@ int get_size_from_read(){
         }
         total += index;
     }
-    printf("index = %d\n",index);
+    //printf("index = %d\n",index);
     first_read_size = ret;
     if(index < ret) return index;
     else return -1;
