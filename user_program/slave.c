@@ -113,7 +113,7 @@ int main(int argc, char *argv[]){
                 }
                 printf("file_index = %d , len = %d\n",file_index , len);
                 while(begin_index < len){
-                    printf("begin_index = %d , file_index = %d\n", begin_index, file_index);
+                    printf("begin_index = %d , file_index = %d, write_buf_offset = %d\n", begin_index, file_index, write_buf_offset);
                     if(init_mmap){
                         if(file_sz[file_index] < 409600) {
                             mmap_type = 1; // small
@@ -151,14 +151,13 @@ int main(int argc, char *argv[]){
                             memcpy(dst, write_buf, write_buf_offset);
                             init_mmap = 1;
                             mmap_cnt ++;
+                            write_buf_offset = 0;
                             if(file_sz[file_index] == 0) {
                                 file_index ++;
-                                write_buf_offset = 0;
                                 mmap_cnt = 0;
                             }
                         }
                     }
-                    
                 }
             }
             break;
@@ -242,3 +241,8 @@ int get_size_from_read(){
     if(index < ret) return index;
     else return -1;
 }
+
+
+// src = mmap(NULL , len ,  , slave_device_fd, offset)
+// dst = mmap(NULL , len , , file_fd[i], offset)
+// memcpy(dst, src, len)
